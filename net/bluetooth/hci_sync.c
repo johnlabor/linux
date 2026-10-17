@@ -3832,6 +3832,9 @@ static int hci_read_dev_class_sync(struct hci_dev *hdev)
 /* Read Local Name */
 static int hci_read_local_name_sync(struct hci_dev *hdev)
 {
+	if (hci_test_quirk(hdev, HCI_QUIRK_BROKEN_READ_LOCAL_NAME))
+		return 0;
+
 	return __hci_cmd_sync_status(hdev, HCI_OP_READ_LOCAL_NAME,
 				     0, NULL, HCI_CMD_TIMEOUT);
 }
@@ -4918,6 +4921,12 @@ static int hci_le_set_write_def_data_len_sync(struct hci_dev *hdev)
 static int hci_le_set_default_phy_sync(struct hci_dev *hdev)
 {
 	struct hci_cp_le_set_default_phy cp;
+
+	if (hci_test_quirk(hdev, HCI_QUIRK_BROKEN_SET_DEFAULT_PHY)) {
+		hdev->le_tx_def_phys = HCI_LE_SET_PHY_1M;
+		hdev->le_rx_def_phys = HCI_LE_SET_PHY_1M;
+		return 0;
+	}
 
 	if (!(hdev->commands[35] & 0x20)) {
 		/* If the command is not supported it means only 1M PHY is

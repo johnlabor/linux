@@ -309,6 +309,22 @@ enum {
 	 */
 	HCI_QUIRK_BROKEN_SET_RPA_TIMEOUT,
 
+	/* When this quirk is set, the HCI_OP_LE_SET_DEFAULT_PHY command is
+	* skipped during initialization. This is required for controllers
+	* which advertise the command but reject the default 1M PHY request.
+	*
+	* This quirk can be set before hci_register_dev is called.
+	*/
+	HCI_QUIRK_BROKEN_SET_DEFAULT_PHY,
+
+	/* When this quirk is set, the HCI_OP_READ_LOCAL_NAME command is
+	* skipped during initialization. This is required for controllers
+	* which become unstable when queried for the local name.
+	*
+	* This quirk can be set before hci_register_dev is called.
+	*/
+	HCI_QUIRK_BROKEN_READ_LOCAL_NAME,
+
 	/*
 	 * When this quirk is set, the HCI_OP_LE_EXT_CREATE_CONN command is
 	 * disabled. This is required for the Actions Semiconductor ATS2851

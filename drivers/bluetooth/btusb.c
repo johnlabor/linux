@@ -67,6 +67,10 @@ static struct usb_driver btusb_driver;
 #define BTUSB_INTEL_NO_WBS_SUPPORT	BIT(26)
 #define BTUSB_ACTIONS_SEMI		BIT(27)
 #define BTUSB_BARROT			BIT(28)
+#define BTUSB_IFNUM_0                  BIT(29)
+#define BTUSB_BROKEN_LE_DEFAULT_PHY    BIT(30)
+#define BTUSB_BROKEN_READ_LOCAL_NAME   BIT(31)
+#define BTUSB_NO_AUTOSUSPEND   		BIT(32)
 
 static const struct usb_device_id btusb_table[] = {
 	/* Generic Bluetooth USB device */
@@ -171,6 +175,14 @@ static const struct usb_device_id btusb_table[] = {
 	/* Intel Bluetooth USB Bootloader (RAM module) */
 	{ USB_DEVICE(0x8087, 0x0a5a),
 	  .driver_info = BTUSB_INTEL_BOOT | BTUSB_BROKEN_ISOC },
+
+       /* PS5 IW620 Bluetooth device */
+	{ USB_DEVICE(0x1286, 0x2059),
+	  .driver_info = BTUSB_MARVELL |
+			 BTUSB_IFNUM_0 |
+			 BTUSB_BROKEN_LE_DEFAULT_PHY |
+			 BTUSB_BROKEN_READ_LOCAL_NAME |
+			 BTUSB_NO_AUTOSUSPEND },
 
 	{ }	/* Terminating entry */
 };
@@ -472,6 +484,11 @@ static const struct usb_device_id quirks_table[] = {
 	{ USB_DEVICE(0x1286, 0x2044), .driver_info = BTUSB_MARVELL },
 	{ USB_DEVICE(0x1286, 0x2046), .driver_info = BTUSB_MARVELL },
 	{ USB_DEVICE(0x1286, 0x204e), .driver_info = BTUSB_MARVELL },
+	{ USB_DEVICE(0x1286, 0x2059), .driver_info = BTUSB_MARVELL |
+						     BTUSB_IFNUM_0 |
+						     BTUSB_BROKEN_LE_DEFAULT_PHY |
+						     BTUSB_BROKEN_READ_LOCAL_NAME |
+						     BTUSB_NO_AUTOSUSPEND },
 
 	/* Intel Bluetooth devices */
 	{ USB_DEVICE(0x8087, 0x0025), .driver_info = BTUSB_INTEL_COMBINED },
@@ -4069,6 +4086,10 @@ static int btusb_probe(struct usb_interface *intf,
 	    (intf->cur_altsetting->desc.bInterfaceNumber != 2))
 		return -ENODEV;
 
+	if ((id->driver_info & BTUSB_IFNUM_0) &&
+		intf->cur_altsetting->desc.bInterfaceNumber != 0)
+		return -ENODEV;
+
 	ifnum_base = intf->cur_altsetting->desc.bInterfaceNumber;
 
 	if (!id->driver_info) {
@@ -4357,6 +4378,12 @@ static int btusb_probe(struct usb_interface *intf,
 	if (id->driver_info & BTUSB_INVALID_LE_STATES)
 		hci_set_quirk(hdev, HCI_QUIRK_BROKEN_LE_STATES);
 
+	if (id->driver_info & BTUSB_BROKEN_LE_DEFAULT_PHY)
+		hci_set_quirk(hdev, HCI_QUIRK_BROKEN_SET_DEFAULT_PHY);
+
+	if (id->driver_info & BTUSB_BROKEN_READ_LOCAL_NAME)
+		hci_set_quirk(hdev, HCI_QUIRK_BROKEN_READ_LOCAL_NAME);
+
 	if (id->driver_info & BTUSB_DIGIANSWER) {
 		data->cmdreq_type = USB_TYPE_VENDOR;
 		hci_set_quirk(hdev, HCI_QUIRK_RESET_ON_CLOSE);
@@ -4413,7 +4440,7 @@ static int btusb_probe(struct usb_interface *intf,
 			data->diag = NULL;
 	}
 
-	if (enable_autosuspend)
+	if (enable_autosuspend && !(id->driver_info & BTUSB_NO_AUTOSUSPEND))
 		usb_enable_autosuspend(data->udev);
 
 	data->poll_sync = enable_poll_sync;

@@ -1163,6 +1163,10 @@ static void init_amd(struct cpuinfo_x86 *c)
 	/* AMD CPUs don't need fencing after x2APIC/TSC_DEADLINE MSR writes. */
 	clear_cpu_cap(c, X86_FEATURE_APIC_MSRS_FENCE);
 
+	if (c->x86 == 0x17 && c->x86_model == 0x46)
+		strscpy(c->x86_model_id, "AMD Custom Zen 2 (Oberon)",
+			sizeof(c->x86_model_id));
+
 	/* Enable Translation Cache Extension */
 	if (cpu_has(c, X86_FEATURE_TCE))
 		msr_set_bit(MSR_EFER, _EFER_TCE);
