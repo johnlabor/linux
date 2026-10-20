@@ -2613,6 +2613,10 @@ static int amdgpu_discovery_set_mm_ip_blocks(struct amdgpu_device *adev)
 				amdgpu_device_ip_block_add(adev, &jpeg_v2_0_ip_block);
 			break;
 		case IP_VERSION(2, 0, 3):
+			if (IS_ENABLED(CONFIG_X86_PS5)) {
+				adev->vcn.num_vcn_inst = 1;
+				amdgpu_device_ip_block_add(adev, &vcn_v2_0_ip_block);
+			}
 			break;
 		case IP_VERSION(2, 5, 0):
 			amdgpu_device_ip_block_add(adev, &vcn_v2_5_ip_block);

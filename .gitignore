@@ -191,3 +191,4 @@ sphinx_*/
 
 # ! .config
 !.config
+!firmware/amdgpu/ps5_vcn.bin
