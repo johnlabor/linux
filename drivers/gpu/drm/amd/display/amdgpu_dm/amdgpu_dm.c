@@ -11059,6 +11059,8 @@ static void amdgpu_dm_atomic_commit_tail(struct drm_atomic_state *state)
 						channels = stream->audio_info.modes[j].channel_count;
 				}
 
+                                channels = 6;
+
 				/* Fallback to stereo if EDID has no audio modes */
 				if (channels == 0)
 					channels = 2;
