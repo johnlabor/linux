@@ -1,3 +1,10 @@
+## PS5 Linux custom fork based on ps5-linux-patches, both fat and slim model supported here
+## Cherry-pick specific changes, tested on 4.03 / 13.60 
+## make -j$(nproc) && sudo make modules_install && sudo make install
+
+
+------
+
 Linux kernel
 ============
 
