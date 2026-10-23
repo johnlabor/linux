@@ -1190,6 +1190,16 @@ int getHdmiConfiguration(void)
 }
 EXPORT_SYMBOL(getHdmiConfiguration);
 
+/* FLAVA3 audio is choppy with the default Naud, Maud is too coarse. */
+u32 getHdmiDpAudioN(u32 default_n)
+{
+	if (hdmi_ic_type == HDMI_IC_TYPE_FLAVA3)
+		return 0x80000;
+
+	return default_n;
+}
+EXPORT_SYMBOL(getHdmiDpAudioN);
+
 bool isHdmiModeValid(const struct drm_display_mode *mode, int force_1080p)
 {
 	u8 vic = drm_match_cea_mode(mode);

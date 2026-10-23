@@ -60,6 +60,7 @@ void sceHdmiDeviceSetVideoMute(int mute);
 void sceHdmiSetAudioMute(int mute);
 void sceHdmiOutputMode(void);
 int getHdmiConfiguration(void);
+u32 getHdmiDpAudioN(u32 default_n);
 bool isHdmiModeValid(const struct drm_display_mode *mode, int force_1080p);
 
 int icc_nvs_write(u32 partition, u16 offset, u16 length, const void *data);
