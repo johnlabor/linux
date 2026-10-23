@@ -89,6 +89,7 @@ int icc_fan_update_param(const u8 *param);
 int icc_fan_update_autoservo_param(void);
 
 void hdmi_notification_handler(struct icc_msg *msg);
+void hdmi_set_hotplug_handler(void (*handler)(void *data), void *data);
 
 void mp1_set_pm1_addr(u64 addr);
 int mp1_set_sleep_entry(void);

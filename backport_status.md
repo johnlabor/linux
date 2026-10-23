@@ -12,6 +12,25 @@ backported.
 
 ## Done (newest first)
 
+### 2026-10-22 21:40 — HDMI display hotplug
+
+Backport of `c091037`.
+
+- `drivers/ps5/hdmi.c` — `hdmi_set_hotplug_handler()` callback, invoked from
+  `hdmi_notification_handler()` once the real EDID arrives; FLAVA3
+  unplugged/wait-resolution sequences restored in `hdmiSystemResume()`.
+- `amdgpu_dm.c` — PS5 keeps HPD off but now drives hotplug through
+  `ps5_hotplug_work`: the work calls `handle_hpd_irq_helper()` for DP
+  connectors, opens a 10 s window, and a 500 ms delayed work forces an atomic
+  commit so audio is re-applied. Forces `skip_detection_link_training` because
+  link training only works during a modeset. Commit-tail setup moved into
+  `dm_ps5_hdmi_enable()`.
+- `amdgpu_dm.h` — four `amdgpu_display_manager` fields under `CONFIG_X86_PS5`.
+
+Local `channels = 6` (`7370c237`) kept in the helper with a TODO — upstream
+derives the count from EDID. `hdmi.c` and `ps5.h` match upstream blobs
+(`a4ace5c`, `5f27f6e`).
+
 ### 2026-10-22 21:23 — FLAVA3 HDMI audio stability
 
 Backport of `035d237`.
@@ -44,37 +63,6 @@ From `8081cd8`, final form `753c793`; gated only by `CONFIG_X86_PS5`.
   license in `firmware/` (self-contained repo).
 
 Result: H.264/HEVC decode+encode, VP9 decode. No AV1 (not in VCN 2.0).
-
-## Upstream next (not yet backported)
-
-Patch repo HEAD is `c091037`; one commit on top of `753c793` remains.
-
-### `c091037` — HDMI display hotplug (#43)
-
-- PS5 has no HPD. `hdmi.c` gains `hdmi_set_hotplug_handler()` (mutex-protected
-  callback) and `hdmi_notification_handler()` calls it when the real EDID
-  arrives.
-- `amdgpu_dm.c` — `dm_hw_init()` registers the handler and initialises
-  `ps5_hotplug_work` / `ps5_hdmi_resetup_work` (instead of HPD init);
-  `dm_hw_fini()` clears and cancels them. Hotplug work calls
-  `handle_hpd_irq_helper()` for DisplayPort connectors.
-- `amdgpu_dm_init()` — force `skip_detection_link_training`; link training
-  only works during modeset.
-- Replug loses audio: a 10 s window is opened (`PS5_HDMI_RESETUP_WINDOW_MS`);
-  if a modeset happens in it, 500 ms delayed work forces an atomic commit on
-  connectors with an active stream. Commit-tail audio setup is factored into
-  `dm_ps5_hdmi_enable()` so it can be re-applied.
-- `hdmiSystemResume()` — for FLAVA3 run `sceSetBackToUnpluggedSequence()` /
-  `sceSetBackToWaitResolutionSequence()` (audio after replug).
-- `amdgpu_dm.h` — four `amdgpu_display_manager` fields under `CONFIG_X86_PS5`:
-  `ps5_hotplug_work`, `ps5_hdmi_resetup_work`, `ps5_hdmi_resetup_until`,
-  `ps5_hdmi_resetup`.
-
-7.1.7 has every API used (`handle_hpd_irq_helper`,
-`dm_force_atomic_commit`, `skip_detection_link_training`,
-`system_percpu_wq`), but the `amdgpu_dm.c` hunks must be ported by hand —
-upstream's patch is against 7.2.3. Decide what to do with the local
-`channels = 6;` override, which has no upstream equivalent.
 
 ## Evaluated and skipped
 
@@ -115,7 +103,7 @@ Why 7.1.7 is kept; none of this is caused by the VCN/fan backports.
   artifacts (char devices) — do not commit.
 - No kernel build has been run yet.
 - MTS (`9322b9d`) deliberately skipped.
-- HDMI audio fix `035d237` is applied; display hotplug `c091037` is not.
+- Patch repo HEAD is `c091037`; all commits through it are now applied.
 
 ## Pending
 
@@ -127,6 +115,5 @@ Why 7.1.7 is kept; none of this is caused by the VCN/fan backports.
    - `vainfo` — H.264/HEVC/VP9 decode
    - `nvtop` during playback — DEC/ENC activity
 4. VCN failure → revert the three amdgpu files, two config lines, firmware copy.
-5. Backport `c091037` (HDMI hotplug); test replug during playback (video +
-   audio within ~500 ms), cold boot with cable in, suspend/resume,
-   multi-channel audio.
+5. Test HDMI hotplug: replug during playback (video + audio within ~500 ms),
+   cold boot with cable in, suspend/resume, multi-channel audio.

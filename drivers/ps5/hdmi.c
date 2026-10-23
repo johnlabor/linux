@@ -3,6 +3,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/ps5.h>
 #include <drm/drm_edid.h>
 
@@ -522,9 +523,10 @@ static void sceControlHdmiEvent(u8 enable)
 
 void hdmiSystemResume(void)
 {
-	// sceSetBackToUnpluggedSequence();
-	// sceSetBackToWaitResolutionSequence();
 	if (hdmi_ic_type == HDMI_IC_TYPE_FLAVA3) {
+		/* Needed for audio to come back after a replug. */
+		sceSetBackToUnpluggedSequence();
+		sceSetBackToWaitResolutionSequence();
 		i2c_cmd_4_2();
 		// sceSetHdcpSequence1st();
 		// sceSetHdcpSequence2nd();
@@ -1237,6 +1239,19 @@ static void fix_edid(u8 *edid)
 	edid[0x7f] = -sum & 0xff;
 }
 
+static DEFINE_MUTEX(hotplug_lock);
+static void (*hotplug_handler)(void *data);
+static void *hotplug_data;
+
+void hdmi_set_hotplug_handler(void (*handler)(void *data), void *data)
+{
+	mutex_lock(&hotplug_lock);
+	hotplug_handler = handler;
+	hotplug_data = data;
+	mutex_unlock(&hotplug_lock);
+}
+EXPORT_SYMBOL(hdmi_set_hotplug_handler);
+
 void hdmi_notification_handler(struct icc_msg *msg)
 {
 		if (msg->data[1] == 0x02) {
@@ -1244,6 +1259,11 @@ void hdmi_notification_handler(struct icc_msg *msg)
 			real_edid = drm_edid_alloc(&msg->data[4], *(u16 *)&msg->data[2]);
 			pr_info("got real edid\n");
 			sceHdmiOutputMode();
+
+			mutex_lock(&hotplug_lock);
+			if (hotplug_handler)
+				hotplug_handler(hotplug_data);
+			mutex_unlock(&hotplug_lock);
 		}
 }
 EXPORT_SYMBOL(hdmi_notification_handler);

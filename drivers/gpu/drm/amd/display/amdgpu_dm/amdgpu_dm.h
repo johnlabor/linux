@@ -705,6 +705,13 @@ struct amdgpu_display_manager {
 	 * Buffer info for the boot time crc.
 	 */
 	struct dm_boot_time_crc_info boot_time_crc_info;
+
+#ifdef CONFIG_X86_PS5
+	struct work_struct ps5_hotplug_work;
+	struct delayed_work ps5_hdmi_resetup_work;
+	unsigned long ps5_hdmi_resetup_until;
+	bool ps5_hdmi_resetup;
+#endif
 };
 
 enum dsc_clock_force_state {

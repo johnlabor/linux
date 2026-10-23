@@ -245,6 +245,15 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 static void handle_hpd_irq_helper(struct amdgpu_dm_connector *aconnector);
 static void handle_hpd_rx_irq(void *param);
 
+#ifdef CONFIG_X86_PS5
+#define PS5_HDMI_RESETUP_WINDOW_MS	10000
+#define PS5_HDMI_RESETUP_DELAY_MS	500
+
+static void dm_ps5_hotplug_handler(void *data);
+static void dm_ps5_hotplug_work_func(struct work_struct *work);
+static void dm_ps5_hdmi_resetup_work_func(struct work_struct *work);
+#endif
+
 static void amdgpu_dm_backlight_set_level(struct amdgpu_display_manager *dm,
 					 int bl_idx,
 					 u32 user_brightness);
@@ -2127,6 +2136,11 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
 	if (amdgpu_dc_debug_mask & DC_SKIP_DETECTION_LT)
 		adev->dm.dc->debug.skip_detection_link_training = true;
 
+#ifdef CONFIG_X86_PS5
+	/* Link training only works during modeset. */
+	adev->dm.dc->debug.skip_detection_link_training = true;
+#endif
+
 	adev->dm.dc->debug.visual_confirm = amdgpu_dc_visual_confirm;
 
 	/* TODO: Remove after DP2 receiver gets proper support of Cable ID feature */
@@ -3141,8 +3155,13 @@ static int dm_hw_init(struct amdgpu_ip_block *ip_block)
 	r = amdgpu_dm_init(adev);
 	if (r)
 		return r;
-#ifndef CONFIG_X86_PS5
-	/* HPD is not supported. */
+#ifdef CONFIG_X86_PS5
+	/* HPD is not supported, use HDMI notifications instead. */
+	INIT_WORK(&adev->dm.ps5_hotplug_work, dm_ps5_hotplug_work_func);
+	INIT_DELAYED_WORK(&adev->dm.ps5_hdmi_resetup_work, dm_ps5_hdmi_resetup_work_func);
+	adev->dm.ps5_hdmi_resetup_until = jiffies;
+	hdmi_set_hotplug_handler(dm_ps5_hotplug_handler, &adev->dm);
+#else
 	amdgpu_dm_hpd_init(adev);
 #endif
 
@@ -3165,8 +3184,11 @@ static int dm_hw_fini(struct amdgpu_ip_block *ip_block)
 {
 	struct amdgpu_device *adev = ip_block->adev;
 
-#ifndef CONFIG_X86_PS5
-	/* HPD is not supported. */
+#ifdef CONFIG_X86_PS5
+	hdmi_set_hotplug_handler(NULL, NULL);
+	cancel_work_sync(&adev->dm.ps5_hotplug_work);
+	cancel_delayed_work_sync(&adev->dm.ps5_hdmi_resetup_work);
+#else
 	amdgpu_dm_hpd_fini(adev);
 #endif
 
@@ -10984,6 +11006,33 @@ static int amdgpu_dm_atomic_setup_commit(struct drm_atomic_state *state)
 	return 0;
 }
 
+#ifdef CONFIG_X86_PS5
+static void dm_ps5_hdmi_enable(struct dc_stream_state *stream,
+			       const struct drm_display_mode *mode)
+{
+	int channels = 0, i;
+
+	for (i = 0; i < stream->audio_info.mode_count; i++) {
+		if (stream->audio_info.modes[i].channel_count > channels)
+			channels = stream->audio_info.modes[i].channel_count;
+	}
+
+	/* TODO: local override (7370c237), not upstream. Always request
+	 * 6 channels; revisit when the audio setup changes.
+	 */
+	channels = 6;
+
+	/* Fallback to stereo if EDID has no audio modes */
+	if (channels == 0)
+		channels = 2;
+
+	sceHdmiSetVideoConfig(mode);
+	sceHdmiDeviceSetVideoMute(0);
+	sceHdmiSetAudioConfig(channels);
+	sceHdmiSetAudioMute(0);
+}
+#endif
+
 /**
  * amdgpu_dm_atomic_commit_tail() - AMDgpu DM's commit tail implementation.
  * @state: The atomic state to commit
@@ -11051,24 +11100,13 @@ static void amdgpu_dm_atomic_commit_tail(struct drm_atomic_state *state)
 		    (!old_crtc_state->active ||
 		     drm_atomic_crtc_needs_modeset(new_crtc_state))) {
 			if (dm_new_crtc_state->stream && dc_is_dp_signal(dm_new_crtc_state->stream->signal)) {
-				struct dc_stream_state *stream = dm_new_crtc_state->stream;
-				int channels = 0, j;
+				dm_ps5_hdmi_enable(dm_new_crtc_state->stream, &new_crtc_state->mode);
 
-				for (j = 0; j < stream->audio_info.mode_count; j++) {
-					if (stream->audio_info.modes[j].channel_count > channels)
-						channels = stream->audio_info.modes[j].channel_count;
-				}
-
-                                channels = 6;
-
-				/* Fallback to stereo if EDID has no audio modes */
-				if (channels == 0)
-					channels = 2;
-
-				sceHdmiSetVideoConfig(&new_crtc_state->mode);
-				sceHdmiDeviceSetVideoMute(0);
-				sceHdmiSetAudioConfig(channels);
-				sceHdmiSetAudioMute(0);
+				/* No audio after a hotplug until it's set up again. */
+				if (time_before(jiffies, dm->ps5_hdmi_resetup_until) &&
+				    !dm->ps5_hdmi_resetup)
+					mod_delayed_work(system_percpu_wq, &dm->ps5_hdmi_resetup_work,
+							 msecs_to_jiffies(PS5_HDMI_RESETUP_DELAY_MS));
 			}
 		}
 	}
@@ -11444,6 +11482,62 @@ void dm_restore_drm_connector_state(struct drm_device *dev,
 	if (acrtc_state->stream->sink != aconnector->dc_sink)
 		dm_force_atomic_commit(&aconnector->base);
 }
+
+#ifdef CONFIG_X86_PS5
+static void dm_ps5_hotplug_work_func(struct work_struct *work)
+{
+	struct amdgpu_display_manager *dm =
+		container_of(work, struct amdgpu_display_manager, ps5_hotplug_work);
+	struct drm_device *dev = adev_to_drm(dm->adev);
+	struct drm_connector_list_iter iter;
+	struct drm_connector *connector;
+
+	dm->ps5_hdmi_resetup_until = jiffies + msecs_to_jiffies(PS5_HDMI_RESETUP_WINDOW_MS);
+
+	drm_connector_list_iter_begin(dev, &iter);
+	drm_for_each_connector_iter(connector, &iter) {
+		if (connector->connector_type == DRM_MODE_CONNECTOR_DisplayPort)
+			handle_hpd_irq_helper(to_amdgpu_dm_connector(connector));
+	}
+	drm_connector_list_iter_end(&iter);
+}
+
+static void dm_ps5_hotplug_handler(void *data)
+{
+	struct amdgpu_display_manager *dm = data;
+
+	queue_work(system_percpu_wq, &dm->ps5_hotplug_work);
+}
+
+static void dm_ps5_hdmi_resetup_work_func(struct work_struct *work)
+{
+	struct amdgpu_display_manager *dm =
+		container_of(to_delayed_work(work), struct amdgpu_display_manager,
+			     ps5_hdmi_resetup_work);
+	struct drm_device *dev = adev_to_drm(dm->adev);
+	struct drm_connector_list_iter iter;
+	struct drm_connector *connector;
+	struct amdgpu_crtc *acrtc;
+
+	drm_modeset_lock_all(dev);
+	dm->ps5_hdmi_resetup = true;
+
+	drm_connector_list_iter_begin(dev, &iter);
+	drm_for_each_connector_iter(connector, &iter) {
+		if (connector->connector_type == DRM_MODE_CONNECTOR_WRITEBACK ||
+		    !connector->state || !connector->encoder)
+			continue;
+
+		acrtc = to_amdgpu_crtc(connector->encoder->crtc);
+		if (acrtc && to_dm_crtc_state(acrtc->base.state)->stream)
+			dm_force_atomic_commit(connector);
+	}
+	drm_connector_list_iter_end(&iter);
+
+	dm->ps5_hdmi_resetup = false;
+	drm_modeset_unlock_all(dev);
+}
+#endif
 
 /*
  * Grabs all modesetting locks to serialize against any blocking commits,
