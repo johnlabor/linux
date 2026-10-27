@@ -12,6 +12,17 @@ backported.
 
 ## Done (newest first)
 
+### 2026-10-27 — SCDC scrambling on 2160p60 exit
+
+Backport of `7ff8d02` (#50).
+
+- `drivers/ps5/hdmi.c` — added a `scrambling` flag; the FLAVA3 TMDS setup now
+  writes `0x7c00 = 0x00` and waits when the previous mode had scrambling on,
+  then records `scrambling = vic == 97`.
+
+Fixes no signal after switching down from 2160p60 (VIC 97) to 1080p60/120.
+Upstream tested those transitions on an Elgato 4K Pro.
+
 ### 2026-10-22 21:40 — HDMI display hotplug
 
 Backport of `c091037`.
@@ -66,17 +77,20 @@ Result: H.264/HEVC decode+encode, VP9 decode. No AV1 (not in VCN 2.0).
 
 ## Evaluated and skipped
 
-| Commit | Subject | Why skipped |
-|---|---|---|
-| `56922cf` | config: Android binder | Waydroid only |
-| `f367cd5` | config: update to 7.2.3 | 7.2.3 churn |
-| `0d2ed27` | fix bugs, disable xhci | mixed; `rdmsrl→rdmsrq` is a 7.2 rename; xhci `#if 0` workaround |
-| `9322b9d` | fixes for MTS Ethernet | wired net works; wired only |
-| `8b7eaea` | btusb changes for 7.2.5 | wrong base (7.2.5 API) |
+Reviewed but not backported. "Deferred" means it may be revisited later;
+"skipped" means it does not apply to this tree.
 
-`9322b9d` would have fixed IMR polarity, added multicast hash filtering,
-switched to dynamic IRQ coalescing, added `napi_disable()` before DMA stop, and
-grown the RX ring 256 → 1024.
+| Commit | Date · PR | Subject | Context |
+|---|---|---|---|
+| `56922cf` | 2026-08-09 · #33 | config: enable Android binder | Only needed to run Waydroid (Android containers); nothing in the PS5 path uses binder. |
+| `f367cd5` | 2026-09-05 · — | config: update to 7.2.3 | Pure version churn to move the base to 7.2.3; we stay on 7.1.7. |
+| `0d2ed27` | 2026-09-05 · — | fix bugs, disable xhci | Three unrelated changes: force `PCIE_BUS_PERFORMANCE` on PS5 (not needed), `rdmsrl`→`rdmsrq` (7.2 API rename, N/A), and wrap `xhci_salina_init()` in `#if 0` (would disable the working Salina xHCI path). |
+| `9322b9d` | 2026-09-28 · #36 | MTS Ethernet fixes | Wired-only: correct IMR polarity, multicast hash filtering, dynamic IRQ coalescing, `napi_disable()` before DMA stop, RX ring 256 → 1024. Wired networking works; wireless is untouched. |
+| `8b7eaea` | 2026-09-29 · #35 | btusb changes for 7.2.5 | Targets 7.2.5 (`BTUSB_BROKEN_EXT_SCAN` is BIT(29), IW620 quirks from `b3fe6d`); the existing PS5 quirk works on 7.1.7. Revisit only if BT regressions appear. |
+| `20a9607` | 2026-10-22 · #44 | firmware: VCN patcher | Tooling only (Python script + README, 77 lines): generates `ps5_vcn.bin` from Navi10 rev 9 firmware. No kernel change; the blob is already embedded. |
+| `670a4c5` | 2026-10-22 · #49 | HDR output on FLAVA3 | Deferred: 174+/21− in `amdgpu_dm.c`, `hdmi.c`, `ps5.h`; overlaps the #43/#54 commit-tail and HDMI paths. |
+| `5618f62` | 2026-10-24 · #53 | HDMI CEC support | Deferred: new `drivers/ps5/ps5-cec.c` (~970 lines) plus `spcie.c` message routing; standalone feature, not requested. |
+| `9bad84f` | 2026-10-27 · #57 | USB-C DP + GFX1013 fixes | Deferred: 27 files, 1521+/134−; USB-C HPD/AUX worker, DCN201/DSC0, GFX1013 GFXOFF/PASID TLB, spcie/MTS/HIDP/xHCI changes; partly 7.2.3-oriented. |
 
 ## 7.2.3 regression research
 

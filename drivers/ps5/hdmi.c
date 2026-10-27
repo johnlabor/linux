@@ -108,6 +108,7 @@ static u8 tmds_polarity;
 static u8 tmds_ch_swap;
 static u8 dp_polarity;
 static u8 dp_ch_swap;
+static bool scrambling;
 
 static void i2c_init(u8 code)
 {
@@ -855,14 +856,15 @@ static void setVideoAdditionalConfigFlava3(const struct drm_display_mode *mode)
 	i2c_waitclear(0x7a84, 0x01);
 	i2c_begin_block();
 	i2c_write(0x7a8b, 0x05);
-	if (vic == 97) {
-		i2c_write(0x7c00, 0x03);
+	if (vic == 97 || scrambling) {
+		i2c_write(0x7c00, vic == 97 ? 0x03 : 0x00);
 		i2c_write_data(0x7a80, (u8[]){0xa8, 0x20, 0x00, 0x80}, 4);
 	}
 	i2c_end_block();
-	if (vic == 97) {
+	if (vic == 97 || scrambling) {
 		i2c_waitclear(0x7a84, 0x01);
 	}
+	scrambling = vic == 97;
 	i2c_begin_block();
 	i2c_write(0x7021, 0xff);
 	i2c_write(0x700a, 0x02);
