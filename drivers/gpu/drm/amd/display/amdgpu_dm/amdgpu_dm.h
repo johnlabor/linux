@@ -707,9 +707,10 @@ struct amdgpu_display_manager {
 	struct dm_boot_time_crc_info boot_time_crc_info;
 
 #ifdef CONFIG_X86_PS5
-	struct work_struct ps5_hotplug_work;
+	struct delayed_work ps5_hotplug_work;
 	struct delayed_work ps5_hdmi_resetup_work;
 	unsigned long ps5_hdmi_resetup_until;
+	unsigned int ps5_hotplug_failures;
 	bool ps5_hdmi_resetup;
 #endif
 };

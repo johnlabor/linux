@@ -12,6 +12,20 @@ backported.
 
 ## Done (newest first)
 
+### 2026-10-27 — HDMI hotplug retry backoff
+
+Backport of `1ec6a4a` (#54).
+
+- `amdgpu_dm.c` — `ps5_hotplug_work` is now a delayed work. New
+  `dm_ps5_link_failed()` detects DP connectors whose CRTC has a stream but
+  whose link is not active; after `PS5_HOTPLUG_RETRIES` (3) consecutive
+  failures, new hotplug notifications are delayed 5 s, doubling up to 60 s.
+  The resetup worker skips untrained links, and both PS5 works use
+  `system_dfl_wq`.
+- `amdgpu_dm.h` — delayed-work type and `ps5_hotplug_failures` counter.
+
+Logs a warning when backing off and an info line when the link recovers.
+
 ### 2026-10-27 — SCDC scrambling on 2160p60 exit
 
 Backport of `7ff8d02` (#50).
@@ -117,7 +131,8 @@ Why 7.1.7 is kept; none of this is caused by the VCN/fan backports.
   artifacts (char devices) — do not commit.
 - No kernel build has been run yet.
 - MTS (`9322b9d`) deliberately skipped.
-- Patch repo HEAD is `c091037`; all commits through it are now applied.
+- Patch repo HEAD is `9bad84f`. Applied through `1ec6a4a` (#54); #49, #53 and
+  #57 are deferred (see table above).
 
 ## Pending
 

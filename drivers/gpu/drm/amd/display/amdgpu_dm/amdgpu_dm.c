@@ -248,6 +248,9 @@ static void handle_hpd_rx_irq(void *param);
 #ifdef CONFIG_X86_PS5
 #define PS5_HDMI_RESETUP_WINDOW_MS	10000
 #define PS5_HDMI_RESETUP_DELAY_MS	500
+#define PS5_HOTPLUG_RETRIES		3
+#define PS5_HOTPLUG_BACKOFF_MS		5000
+#define PS5_HOTPLUG_BACKOFF_MAX_MS	60000
 
 static void dm_ps5_hotplug_handler(void *data);
 static void dm_ps5_hotplug_work_func(struct work_struct *work);
@@ -3157,7 +3160,7 @@ static int dm_hw_init(struct amdgpu_ip_block *ip_block)
 		return r;
 #ifdef CONFIG_X86_PS5
 	/* HPD is not supported, use HDMI notifications instead. */
-	INIT_WORK(&adev->dm.ps5_hotplug_work, dm_ps5_hotplug_work_func);
+	INIT_DELAYED_WORK(&adev->dm.ps5_hotplug_work, dm_ps5_hotplug_work_func);
 	INIT_DELAYED_WORK(&adev->dm.ps5_hdmi_resetup_work, dm_ps5_hdmi_resetup_work_func);
 	adev->dm.ps5_hdmi_resetup_until = jiffies;
 	hdmi_set_hotplug_handler(dm_ps5_hotplug_handler, &adev->dm);
@@ -3186,7 +3189,7 @@ static int dm_hw_fini(struct amdgpu_ip_block *ip_block)
 
 #ifdef CONFIG_X86_PS5
 	hdmi_set_hotplug_handler(NULL, NULL);
-	cancel_work_sync(&adev->dm.ps5_hotplug_work);
+	cancel_delayed_work_sync(&adev->dm.ps5_hotplug_work);
 	cancel_delayed_work_sync(&adev->dm.ps5_hdmi_resetup_work);
 #else
 	amdgpu_dm_hpd_fini(adev);
@@ -11105,7 +11108,7 @@ static void amdgpu_dm_atomic_commit_tail(struct drm_atomic_state *state)
 				/* No audio after a hotplug until it's set up again. */
 				if (time_before(jiffies, dm->ps5_hdmi_resetup_until) &&
 				    !dm->ps5_hdmi_resetup)
-					mod_delayed_work(system_percpu_wq, &dm->ps5_hdmi_resetup_work,
+					mod_delayed_work(system_dfl_wq, &dm->ps5_hdmi_resetup_work,
 							 msecs_to_jiffies(PS5_HDMI_RESETUP_DELAY_MS));
 			}
 		}
@@ -11484,13 +11487,41 @@ void dm_restore_drm_connector_state(struct drm_device *dev,
 }
 
 #ifdef CONFIG_X86_PS5
+/* A stream is set but its DP link failed to train. */
+static bool dm_ps5_link_failed(struct drm_device *dev)
+{
+	struct drm_connector_list_iter iter;
+	struct drm_connector *connector;
+	struct amdgpu_crtc *acrtc;
+	bool failed = false;
+
+	drm_modeset_lock_all(dev);
+	drm_connector_list_iter_begin(dev, &iter);
+	drm_for_each_connector_iter(connector, &iter) {
+		if (connector->connector_type != DRM_MODE_CONNECTOR_DisplayPort ||
+		    !connector->state || !connector->encoder)
+			continue;
+
+		acrtc = to_amdgpu_crtc(connector->encoder->crtc);
+		if (acrtc && to_dm_crtc_state(acrtc->base.state)->stream &&
+		    !to_amdgpu_dm_connector(connector)->dc_link->link_status.link_active)
+			failed = true;
+	}
+	drm_connector_list_iter_end(&iter);
+	drm_modeset_unlock_all(dev);
+
+	return failed;
+}
+
 static void dm_ps5_hotplug_work_func(struct work_struct *work)
 {
 	struct amdgpu_display_manager *dm =
-		container_of(work, struct amdgpu_display_manager, ps5_hotplug_work);
+		container_of(to_delayed_work(work), struct amdgpu_display_manager,
+			     ps5_hotplug_work);
 	struct drm_device *dev = adev_to_drm(dm->adev);
 	struct drm_connector_list_iter iter;
 	struct drm_connector *connector;
+	unsigned int failures;
 
 	dm->ps5_hdmi_resetup_until = jiffies + msecs_to_jiffies(PS5_HDMI_RESETUP_WINDOW_MS);
 
@@ -11500,13 +11531,28 @@ static void dm_ps5_hotplug_work_func(struct work_struct *work)
 			handle_hpd_irq_helper(to_amdgpu_dm_connector(connector));
 	}
 	drm_connector_list_iter_end(&iter);
+
+	failures = dm_ps5_link_failed(dev) ? dm->ps5_hotplug_failures + 1 : 0;
+	if (failures == PS5_HOTPLUG_RETRIES)
+		drm_warn(dev, "PS5: DP link training keeps failing after HDMI hotplug, backing off\n");
+	else if (!failures && dm->ps5_hotplug_failures >= PS5_HOTPLUG_RETRIES)
+		drm_info(dev, "PS5: DP link trained after HDMI hotplug\n");
+	WRITE_ONCE(dm->ps5_hotplug_failures, failures);
 }
 
 static void dm_ps5_hotplug_handler(void *data)
 {
 	struct amdgpu_display_manager *dm = data;
+	unsigned int failures = READ_ONCE(dm->ps5_hotplug_failures);
+	unsigned int delay = 0;
 
-	queue_work(system_percpu_wq, &dm->ps5_hotplug_work);
+	/* Don't retrain on every notification while link training keeps failing. */
+	if (failures >= PS5_HOTPLUG_RETRIES)
+		delay = min_t(unsigned int,
+			      PS5_HOTPLUG_BACKOFF_MS << min(failures - PS5_HOTPLUG_RETRIES, 4U),
+			      PS5_HOTPLUG_BACKOFF_MAX_MS);
+
+	queue_delayed_work(system_dfl_wq, &dm->ps5_hotplug_work, msecs_to_jiffies(delay));
 }
 
 static void dm_ps5_hdmi_resetup_work_func(struct work_struct *work)
@@ -11529,7 +11575,9 @@ static void dm_ps5_hdmi_resetup_work_func(struct work_struct *work)
 			continue;
 
 		acrtc = to_amdgpu_crtc(connector->encoder->crtc);
-		if (acrtc && to_dm_crtc_state(acrtc->base.state)->stream)
+		/* Nothing to set up again if the link didn't train. */
+		if (acrtc && to_dm_crtc_state(acrtc->base.state)->stream &&
+		    to_amdgpu_dm_connector(connector)->dc_link->link_status.link_active)
 			dm_force_atomic_commit(connector);
 	}
 	drm_connector_list_iter_end(&iter);
