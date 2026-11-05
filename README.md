@@ -1,6 +1,9 @@
-## PS5 Linux custom fork based on ps5-linux-patches, both fat and slim model supported here
-## Cherry-pick specific changes, tested on 4.03 / 13.60 
-## make -j$(nproc) && sudo make modules_install && sudo make install
+## PS5 Linux custom fork based on ps5-linux-patches, Linux 7.1.7, personal use only
+## Cherry-picked changes only. Not all upstream commits are included; see [backport_status.md](backport_status.md)
+## Tested on disc-edition PS5 original (4.03) and PS5 Slim (13.60)
+## make -j$(nproc)
+## sudo make modules_install
+## sudo make install
 
 
 ------
