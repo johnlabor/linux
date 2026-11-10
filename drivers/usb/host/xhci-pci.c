@@ -686,7 +686,9 @@ int xhci_pci_common_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	/* USB-2 and USB-3 roothubs initialized, allow runtime pm suspend */
 	pm_runtime_put_noidle(&dev->dev);
 
-	if (pci_choose_state(dev, PMSG_SUSPEND) == PCI_D0)
+	/* The PS5 Salina controller does not return from runtime D3 */
+	if (pci_choose_state(dev, PMSG_SUSPEND) == PCI_D0 ||
+	    (xhci->quirks & XHCI_PS5_SALINA_PHY))
 		pm_runtime_get(&dev->dev);
 	else if (xhci->quirks & XHCI_DEFAULT_PM_RUNTIME_ALLOW)
 		pm_runtime_allow(&dev->dev);
@@ -739,7 +741,8 @@ void xhci_pci_remove(struct pci_dev *dev)
 
 	xhci->xhc_state |= XHCI_STATE_REMOVING;
 
-	if (pci_choose_state(dev, PMSG_SUSPEND) == PCI_D0)
+	if (pci_choose_state(dev, PMSG_SUSPEND) == PCI_D0 ||
+	    (xhci->quirks & XHCI_PS5_SALINA_PHY))
 		pm_runtime_put(&dev->dev);
 	else if (xhci->quirks & XHCI_DEFAULT_PM_RUNTIME_ALLOW)
 		pm_runtime_forbid(&dev->dev);
