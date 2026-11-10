@@ -4221,10 +4221,6 @@ static int btusb_probe(struct usb_interface *intf,
 	    (intf->cur_altsetting->desc.bInterfaceNumber != 2))
 		return -ENODEV;
 
-	if ((id->driver_info & BTUSB_IFNUM_0) &&
-		intf->cur_altsetting->desc.bInterfaceNumber != 0)
-		return -ENODEV;
-
 	ifnum_base = intf->cur_altsetting->desc.bInterfaceNumber;
 
 	if (!id->driver_info) {
@@ -4234,6 +4230,11 @@ static int btusb_probe(struct usb_interface *intf,
 		if (match)
 			id = match;
 	}
+
+	/* Check after the quirks_table lookup: PS5 devices are matched there. */
+	if ((id->driver_info & BTUSB_IFNUM_0) &&
+	    intf->cur_altsetting->desc.bInterfaceNumber != 0)
+		return -ENODEV;
 
 	if (id->driver_info == BTUSB_IGNORE)
 		return -ENODEV;

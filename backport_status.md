@@ -21,7 +21,9 @@ Backports of `f683ac4` (MT7921), `c5f999d` (IW620), `1496086` (Salina).
   D3. Both models.
 - `btusb.c` — Slim MT7921 `0e8d:3603`: bind interface 0, pair bulk-OUT with
   bulk-IN, skip the ISO setup (`BTUSB_PAIRED_BULK_EP`, `BTUSB_MTK_NO_ISO`).
-  Fixes pairing and kexec loss.
+  Fixes pairing and kexec loss. Local fix: check `IFNUM_0` after the
+  `quirks_table` lookup; before it, every interface bound and a broken second
+  HCI appeared on interface 3.
 - `btusb.c` — fat IW620 `1286:2059`: clears LL-privacy/ext-adv bits and
   answers the repeated link-key request (`ps5_iw620_le`, `ps5_iw620_linkkey`,
   both default on). Fixes LE bonding and reconnects.
