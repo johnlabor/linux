@@ -71,6 +71,8 @@ static struct usb_driver btusb_driver;
 #define BTUSB_BROKEN_LE_DEFAULT_PHY    BIT(30)
 #define BTUSB_BROKEN_READ_LOCAL_NAME   BIT(31)
 #define BTUSB_NO_AUTOSUSPEND   		BIT(32)
+#define BTUSB_PAIRED_BULK_EP		BIT(33)
+#define BTUSB_MTK_NO_ISO		BIT(34)
 
 static const struct usb_device_id btusb_table[] = {
 	/* Generic Bluetooth USB device */
@@ -632,6 +634,12 @@ static const struct usb_device_id quirks_table[] = {
 	  .driver_info = BTUSB_REALTEK },
 
 	/* MediaTek Bluetooth devices */
+	/* PS5 MT7921 Bluetooth device */
+	{ USB_DEVICE(0x0e8d, 0x3603), .driver_info = BTUSB_MEDIATEK |
+						     BTUSB_WIDEBAND_SPEECH |
+						     BTUSB_IFNUM_0 |
+						     BTUSB_PAIRED_BULK_EP |
+						     BTUSB_MTK_NO_ISO },
 	{ USB_VENDOR_AND_INTERFACE_INFO(0x0e8d, 0xe0, 0x01, 0x01),
 	  .driver_info = BTUSB_MEDIATEK |
 			 BTUSB_WIDEBAND_SPEECH },
@@ -957,6 +965,7 @@ struct qca_dump_info {
 #define BTUSB_USE_ALT3_FOR_WBS	15
 #define BTUSB_ALT6_CONTINUOUS_TX	16
 #define BTUSB_HW_SSR_ACTIVE	17
+#define BTUSB_NO_ISO_INTF	18
 
 struct btusb_data {
 	struct hci_dev       *hdev;
@@ -2953,7 +2962,8 @@ static int btusb_mtk_setup(struct hci_dev *hdev)
 	btmtk_data->reset_sync = btusb_mtk_reset;
 
 	/* Claim ISO data interface and endpoint */
-	if (!test_bit(BTMTK_ISOPKT_OVER_INTR, &btmtk_data->flags)) {
+	if (!test_bit(BTUSB_NO_ISO_INTF, &data->flags) &&
+	    !test_bit(BTMTK_ISOPKT_OVER_INTR, &btmtk_data->flags)) {
 		btmtk_data->isopkt_intf = usb_ifnum_to_if(data->udev, MTK_ISO_IFNUM);
 		btusb_mtk_claim_iso_intf(data);
 	}
@@ -4070,6 +4080,23 @@ static struct hci_drv btusb_hci_drv = {
 	.specific_handlers	= btusb_hci_drv_specific_handlers,
 };
 
+/* Use the bulk OUT endpoint that matches bulk IN */
+static void btusb_pair_bulk_tx_ep(struct btusb_data *data,
+				  struct usb_host_interface *alt)
+{
+	u8 num = usb_endpoint_num(data->bulk_rx_ep);
+	int i;
+
+	for (i = 0; i < alt->desc.bNumEndpoints; i++) {
+		struct usb_endpoint_descriptor *ep = &alt->endpoint[i].desc;
+
+		if (usb_endpoint_is_bulk_out(ep) && usb_endpoint_num(ep) == num) {
+			data->bulk_tx_ep = ep;
+			return;
+		}
+	}
+}
+
 static int btusb_probe(struct usb_interface *intf,
 		       const struct usb_device_id *id)
 {
@@ -4124,6 +4151,13 @@ static int btusb_probe(struct usb_interface *intf,
 		kfree(data);
 		return -ENODEV;
 	}
+
+	if (id->driver_info & BTUSB_PAIRED_BULK_EP)
+		btusb_pair_bulk_tx_ep(data, intf->cur_altsetting);
+
+	/* The ISO setup times out and the reset after it breaks re-enumeration */
+	if (id->driver_info & BTUSB_MTK_NO_ISO)
+		set_bit(BTUSB_NO_ISO_INTF, &data->flags);
 
 	if (id->driver_info & BTUSB_AMP) {
 		data->cmdreq_type = USB_TYPE_CLASS | 0x01;
